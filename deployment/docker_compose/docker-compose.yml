@@ -38,7 +38,11 @@ services:
       relational_db:
         condition: service_started
       opensearch:
-        condition: service_started
+        # Wait for OpenSearch to actually serve before starting api_server:
+        # its setup_onyx() raises RuntimeError when the document index is not
+        # reachable within NUM_RETRIES_ON_STARTUP attempts, which crash-loops
+        # the container on cold boots.
+        condition: service_healthy
       cache:
         condition: service_started
       inference_model_server:
@@ -59,7 +63,11 @@ services:
       - POSTGRES_HOST=${POSTGRES_HOST:-relational_db}
       - OPENSEARCH_HOST=${OPENSEARCH_HOST:-opensearch}
       - OPENSEARCH_ADMIN_PASSWORD=${OPENSEARCH_ADMIN_PASSWORD:-StrongPassword123!}
-      - REDIS_HOST=${REDIS_HOST:-cache}
+      # Cold-start budget for document-index setup (setup_onyx). Upstream's
+      # default of 10 attempts (~50 s) is shorter than OpenSearch's cold boot
+      # on a busy host, which makes api_server exit with "Could not connect to
+      # a document index within the specified timeout." 60 attempts ~ 5 min.
+      - NUM_RETRIES_ON_STARTUP=${NUM_RETRIES_ON_STARTUP:-60}
       - MODEL_SERVER_HOST=${MODEL_SERVER_HOST:-inference_model_server}
       - CODE_INTERPRETER_BASE_URL=${CODE_INTERPRETER_BASE_URL:-http://code-interpreter:8000}
       - S3_ENDPOINT_URL=${S3_ENDPOINT_URL:-http://minio:9000}
@@ -383,6 +391,20 @@ services:
       options:
         max-size: "50m"
         max-file: "6"
+    # Readiness for api_server's depends_on: only yellow status means the
+    # HTTP API and the node accept writes. The admin password env var is
+    # interpolated by the container shell at probe time ($$ keeps compose
+    # from touching it).
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -k -s -u admin:$${OPENSEARCH_INITIAL_ADMIN_PASSWORD} 'https://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s' || exit 1",
+        ]
+      interval: 10s
+      timeout: 15s
+      retries: 60
+      start_period: 30s
 
   nginx:
     image: ${BASE_IMAGE_REGISTRY:-docker.io}/library/nginx:1.25.5-alpine
