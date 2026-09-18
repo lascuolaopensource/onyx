@@ -36,6 +36,11 @@ downloads these same files itself).
 4. **`data/nginx/app.conf.template` honors `X-Forwarded-Proto`** from the proxy instead of
    hardcoding `$scheme`. Onyx's nginx is not the TLS entry point here; without this the
    back end sees `http` and drops the `Secure` flag from auth cookies.
+5. **OpenSearch memory locking is opt-in.** Upstream sets `bootstrap.memory_lock=true` with
+   a `memlock: -1` ulimit; runc cannot raise `RLIMIT_MEMLOCK` to unlimited on every host
+   (restricted or nested Docker daemons fail the container with
+   `error setting rlimit type 8: operation not permitted`, type 8 = `RLIMIT_MEMLOCK`).
+   Here it defaults to `false` so the stack boots anywhere. See "Host prerequisites".
 
 ## Sizing (Standard)
 
@@ -43,6 +48,48 @@ Minimum ~4 vCPU / 10 GB RAM / 32 GB disk; preferred 8+ vCPU / 16+ GB RAM. OpenSe
 pinned at `-Xms2g -Xmx2g`; if you give the box more RAM, raise it to ~50 % of available
 memory and remember the extra is used for the OS file cache. Disk ≈ 1.45× indexed source
 data. See <https://docs.onyx.app/deployment/getting_started/resourcing>.
+
+## Host prerequisites (OpenSearch)
+
+Two host-level kernel/runtime settings decide whether OpenSearch starts:
+
+1. **`vm.max_map_count` ≥ 262144 — mandatory.** Without it OpenSearch crashes at boot with
+   `max virtual memory areas vm.max_map_count [65530] is too low`. It is not namespaced, so
+   it must be set on the host, not in the compose file:
+
+   ```sh
+   sudo sysctl -w vm.max_map_count=262144
+   echo 'vm.max_map_count=262144' | sudo tee /etc/sysctl.d/99-onyx-opensearch.conf
+   ```
+
+2. **Memory locking — optional.** Upstream's `bootstrap.memory_lock=true` + unlimited
+   `memlock` ulimit needs a Docker daemon allowed to raise `RLIMIT_MEMLOCK`; on hosts
+   where it cannot, OpenSearch never starts (`error setting rlimit type 8`). This repo
+   defaults it to `false` — the node boots and simply may page the JVM heap to swap. To
+   enable it: give the daemon the limit and opt in,
+
+   ```sh
+   # /etc/systemd/system/docker.service.d/memlock.conf
+   [Service]
+   LimitMEMLOCK=infinity
+   ```
+
+   ```sh
+   sudo systemctl daemon-reload && sudo systemctl restart docker
+   ```
+
+   then set `OPENSEARCH_MEMORY_LOCK=true` in the environment and add the ulimit via an
+   extra compose file (`-f` after the base ones):
+
+   ```yaml
+   # docker-compose.memlock.yml
+   services:
+     opensearch:
+       ulimits:
+         memlock:
+           soft: -1
+           hard: -1
+   ```
 
 ## Coolify
 
