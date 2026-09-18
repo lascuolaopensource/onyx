@@ -1,0 +1,16 @@
+[tools]
+go = "1.26.2"
+node = "latest"
+taplo = "latest"
+
+[tasks.format]
+run = """
+npx --yes prettier --write AGENTS.md PURIA.md '.puria/**/*.md'
+taplo format mise.toml
+"""
+
+[tasks.lint]
+depends = ["lint:design"]
+
+[tasks."lint:design"]
+run = "if [ -f .puria/design/DESIGN.md ]; then npx --yes @google/design.md lint .puria/design/DESIGN.md; fi"
