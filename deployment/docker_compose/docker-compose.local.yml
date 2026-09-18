@@ -1,0 +1,9 @@
+# Local-only override: publishes Onyx's nginx on the host.
+# Coolify never sees this file — it deploys docker-compose.yml directly. Run it with:
+#   mise run local
+#   docker compose -f docker-compose.yml -f docker-compose.local.yml up -d
+services:
+  nginx:
+    ports:
+      - "${HOST_PORT:-3000}:80" # http://localhost:3000
+      - "${HOST_PORT_80:-80}:80" # http://localhost

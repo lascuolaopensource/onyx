@@ -29,8 +29,8 @@ downloads these same files itself).
    pulls its published image. If `build:` is left in, Coolify builds from `../../backend`
    and fails.
 2. **`nginx` publishes no host ports.** The platform proxy owns 80/443 and reaches the
-   container over the app network. For a plain `docker compose up`, add a port via an
-   override (below).
+   container over the app network. Local runs publish ports through the separate
+   `docker-compose.local.yml` (below).
 3. **MinIO always starts** (no `s3-filestore` profile), so the S3 file store never depends
    on `COMPOSE_PROFILES` surviving the platform.
 4. **`data/nginx/app.conf.template` honors `X-Forwarded-Proto`** from the proxy instead of
@@ -87,52 +87,34 @@ data. See <https://docs.onyx.app/deployment/getting_started/resourcing>.
 
 ## Run locally (Docker Compose)
 
-Same file, no Coolify. The base file intentionally publishes no host ports, so add a small
-override to reach it from the host.
+`mise run local` brings up the full stack. On the first run it creates `.env` from
+`env.template` and fills `USER_AUTH_SECRET` and `ENCRYPTION_KEY_SECRET` with generated
+secrets; later runs keep your edits.
 
-1. Create `deployment/docker_compose/docker-compose.override.yml`:
+```sh
+mise run local        # up; creates .env + generated secrets on first run
+mise run local:logs   # follow container logs
+mise run local:down   # stop, remove containers, keep data volumes
+mise run local:reset  # stop and delete all data volumes — destructive
+```
 
-   ```yaml
-   services:
-     nginx:
-       ports:
-         - "${HOST_PORT:-3000}:80" # http://localhost:3000
-         - "${HOST_PORT_80:-80}:80" # http://localhost
-   ```
+Open <http://localhost:3000> (or <http://localhost> on port 80). The first user to sign up
+becomes admin. The first boot pulls several GB of images, runs Alembic migrations and
+downloads the HuggingFace embedding/rerank models — allow 10+ minutes and network access.
+`local:reset` deletes the Postgres, OpenSearch and MinIO volumes, so only use it to start
+over from an empty deployment.
 
-   Do not commit it: Coolify runs Compose from this same directory, and published host
-   ports would collide with its proxy.
+The local ports live in `docker-compose.local.yml`, committed next to the base file. It is
+separate from `docker-compose.yml` — the only file Coolify is pointed at — so local runs
+never collide with the platform proxy. Raw Docker Compose equivalent:
 
-2. Create `.env` and fill in the required values — the same list as the Coolify step,
-   with throwaway secrets locally:
+```sh
+cd deployment/docker_compose
+cp env.template .env   # then set USER_AUTH_SECRET (required) and the secrets above
+docker compose -f docker-compose.yml -f docker-compose.local.yml up -d
+```
 
-   ```sh
-   cd deployment/docker_compose
-   cp env.template .env
-   openssl rand -hex 32   # USER_AUTH_SECRET
-   openssl rand -hex 32   # ENCRYPTION_KEY_SECRET
-   ```
-
-   Set `WEB_DOMAIN` to the URL you browse, or leave it unset on localhost.
-
-3. Start it, watch the first boot, then stop it:
-
-   ```sh
-   docker compose up -d
-   docker compose ps
-   docker compose logs -f api_server web_server
-   ```
-
-   Open <http://localhost:3000> (or <http://localhost> on port 80). The first user to
-   sign up becomes admin. The first boot pulls several GB, runs Alembic migrations and
-   downloads the HuggingFace embedding/rerank models — allow 10+ minutes and network
-   access.
-
-   ```sh
-   docker compose stop      # stop containers, keep data
-   docker compose down      # remove containers, keep named volumes
-   docker compose down -v   # remove containers and all data volumes
-   ```
+Set `WEB_DOMAIN` to the URL you browse, or leave it unset on localhost.
 
 Local sizing is the same as the host sizing above (~4 vCPU / 10 GB RAM, ~40 GB disk). On
 Docker Desktop raise the VM memory limit; on Linux Docker uses host memory directly.

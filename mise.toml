@@ -14,3 +14,38 @@ depends = ["lint:design"]
 
 [tasks."lint:design"]
 run = "if [ -f .puria/design/DESIGN.md ]; then npx --yes @google/design.md lint .puria/design/DESIGN.md; fi"
+
+[tasks.local]
+description = "Run Onyx locally with Docker Compose (creates .env with generated secrets on first run)"
+dir = "deployment/docker_compose"
+run = """
+command -v docker >/dev/null 2>&1 || { echo 'docker is required; mise does not manage the Docker engine.' >&2; exit 1; }
+if [ ! -f .env ]; then
+  cp env.template .env
+fi
+if grep -q '^USER_AUTH_SECRET=""' .env; then
+  sed -i.bak -e "s|^USER_AUTH_SECRET=.*|USER_AUTH_SECRET=\"$(openssl rand -hex 32)\"|" .env && rm -f .env.bak
+fi
+if ! grep -q '^ENCRYPTION_KEY_SECRET=' .env; then
+  printf 'ENCRYPTION_KEY_SECRET="%s"\n' "$(openssl rand -hex 32)" >> .env
+fi
+docker compose -f docker-compose.yml -f docker-compose.local.yml up -d
+echo
+echo 'Onyx UI:  http://localhost:3000  (or http://localhost on port 80)'
+echo 'logs:     mise run local:logs'
+"""
+
+[tasks."local:logs"]
+description = "Follow Onyx container logs"
+dir = "deployment/docker_compose"
+run = "docker compose -f docker-compose.yml -f docker-compose.local.yml logs -f"
+
+[tasks."local:down"]
+description = "Stop Onyx, remove containers, keep data volumes"
+dir = "deployment/docker_compose"
+run = "docker compose -f docker-compose.yml -f docker-compose.local.yml down"
+
+[tasks."local:reset"]
+description = "Stop Onyx and delete all data volumes (destructive)"
+dir = "deployment/docker_compose"
+run = "docker compose -f docker-compose.yml -f docker-compose.local.yml down -v"
