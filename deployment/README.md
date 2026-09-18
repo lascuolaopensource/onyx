@@ -41,6 +41,12 @@ downloads these same files itself).
    (restricted or nested Docker daemons fail the container with
    `error setting rlimit type 8: operation not permitted`, type 8 = `RLIMIT_MEMLOCK`).
    Here it defaults to `false` so the stack boots anywhere. See "Host prerequisites".
+6. **OpenSearch readiness gating + retry budget.** Onyx's `setup_onyx()` raises
+   `RuntimeError("Could not connect to a document index within the specified timeout.")`
+   after `NUM_RETRIES_ON_STARTUP` attempts (upstream default: 10 ≈ 50 s), crash-looping
+   `api_server` on cold boots while OpenSearch is still starting. Here `api_server` waits
+   for an OpenSearch healthcheck (`_cluster/health?wait_for_status=yellow`) before starting
+   and the retry budget defaults to 60 (~5 min).
 
 ## Sizing (Standard)
 
@@ -174,7 +180,14 @@ Docker Desktop raise the VM memory limit; on Linux Docker uses host memory direc
 - **Rootless Docker**: `code-interpreter` mounts the daemon socket. On rootless setups set
   `DOCKER_SOCK_PATH=${XDG_RUNTIME_DIR}/docker.sock`; on Docker Desktop confirm the socket
   is available to the container.
+- **First boot ordering**: `api_server` starts only after OpenSearch reports yellow, and
+  `nginx` starts only after `api_server` is healthy. First boot therefore takes several
+  minutes by design (model downloads are not gated, they keep downloading in the
+  background). Raise `NUM_RETRIES_ON_STARTUP` if your host is slower.
+- **PR previews**: every Coolify preview deployment of a pull request runs the entire
+  12-container stack with fresh volumes. Disable preview deployments for this resource
+  unless you actually need them.
 - **Upgrades**: change `IMAGE_TAG` to a release tag and redeploy; with `latest`, pull first.
 - These files are derived from upstream `main`; re-fetch them when you want a newer
-  compose revision, then re-apply the four differences listed above.
+  compose revision, then re-apply the divergences listed above.
 - Never commit `.env` or real secrets.
