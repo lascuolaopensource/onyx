@@ -359,26 +359,24 @@ services:
       # forming a cluster and waiting for other nodes to become live.
       - discovery.type=single-node
       - OPENSEARCH_INITIAL_ADMIN_PASSWORD=${OPENSEARCH_ADMIN_PASSWORD:-StrongPassword123!}
-      # This and the JVM config below come from the example in https://docs.opensearch.org/latest/install-and-configure/install-opensearch/docker/
-      # We do this to avoid unstable performance from page swaps.
-      - bootstrap.memory_lock=true # Disable JVM heap memory swapping.
-      # Java heap should be ~50% of memory limit. For now we assume a limit of
-      # 4g although in practice the container can request more than this.
+      # Upstream sets bootstrap.memory_lock=true with a memlock ulimit of -1
+      # (unlimited). runc cannot raise RLIMIT_MEMLOCK to unlimited on every
+      # host — restricted or nested Docker daemons fail the container with
+      # "error setting rlimit type 8: operation not permitted" (type 8 is
+      # RLIMIT_MEMLOCK). Memory locking is therefore opt-in here; with the
+      # default OpenSearch boots and only loses swap protection. To enable it,
+      # see "Host prerequisites" in ../README.md.
+      - bootstrap.memory_lock=${OPENSEARCH_MEMORY_LOCK:-false}
+      # Java heap should be ~50% of memory limit. The default assumes ~4 GB
+      # available to the container. Xms and Xmx must be the same.
       # See https://opster.com/guides/opensearch/opensearch-basics/opensearch-heap-size-usage-and-jvm-garbage-collection/
-      # Xms is the starting size, Xmx is the maximum size. These should be the
-      # same.
       - "OPENSEARCH_JAVA_OPTS=-Xms2g -Xmx2g"
     volumes:
       - opensearch-data:/usr/share/opensearch/data
-    # These come from the example in https://docs.opensearch.org/latest/install-and-configure/install-opensearch/docker/
     ulimits:
-      # Similarly to bootstrap.memory_lock, we don't want to impose limits on
-      # how much memory a process can lock from being swapped.
-      memlock:
-        soft: -1 # Set memlock to unlimited (no soft or hard limit).
-        hard: -1
       nofile:
-        soft: 65536 # Maximum number of open files for the opensearch user - set to at least 65536.
+        # Maximum number of open files for the opensearch user.
+        soft: 65536
         hard: 65536
     logging:
       driver: json-file
